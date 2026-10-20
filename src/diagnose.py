@@ -24,7 +24,7 @@ from src.baselines import popularity_scores, restore_preparation, time_relation_
 from src.dataset import build_evaluation_examples
 from src.evaluate import evaluate_examples
 from src.scoring import make_score_batch
-from src.train import load_transformer_checkpoint, resolve_device
+from src.train import load_checkpoint, resolve_device
 
 
 def retained_timestamps(examples, splits, vocabulary):
@@ -121,12 +121,13 @@ def run_diagnostics(
     started = perf_counter()
     torch.set_num_threads(num_threads)
     manifest, ratings, splits, vocabulary = restore_preparation(data_dir, preparation_path)
-    model, checkpoint = load_transformer_checkpoint(
+    model, checkpoint = load_checkpoint(
         run_dir / "best.pt", manifest["fingerprint"], device
     )
     source_config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
     if (source_config["preparation_fingerprint"] != manifest["fingerprint"]
-            or source_config["model_config"] != checkpoint["model_config"]):
+            or source_config["model_config"] != checkpoint["model_config"]
+            or source_config.get("model_type", "transformer") != checkpoint["model_type"]):
         raise ValueError("Run configuration does not match checkpoint/preparation.")
     examples, coverage = build_evaluation_examples(
         ratings, splits, vocabulary, "validation",
@@ -176,6 +177,7 @@ def run_diagnostics(
             "repeats": repeats,
         }
     report = {
+        "model": source_config["model"], "model_type": checkpoint["model_type"],
         "split": "validation", "checkpoint_epoch": checkpoint["epoch"],
         "checkpoint_sha256": hashlib.sha256((run_dir / "best.pt").read_bytes()).hexdigest(),
         "preparation_fingerprint": manifest["fingerprint"],
@@ -202,7 +204,7 @@ def run_diagnostics(
         "source_run_code_sha256": source_config["code_sha256"],
         "diagnostic_code_sha256": {
             name: hashlib.sha256(Path(__file__).parent.joinpath(name).read_bytes()).hexdigest()
-            for name in ("diagnose.py", "models/transformer.py", "scoring.py", "evaluate.py", "train.py")
+            for name in ("diagnose.py", "models/mlp.py", "models/transformer.py", "scoring.py", "evaluate.py", "train.py")
         },
         "total_seconds": perf_counter() - started,
     }
@@ -229,6 +231,7 @@ def main():
         args.shuffle_seeds, args.batch_size, args.device, args.num_threads,
     )
     print(json.dumps({
+        "model_type": report["model_type"],
         "split": report["split"], "checkpoint_epoch": report["checkpoint_epoch"],
         "original_matches_checkpoint": report["original_matches_checkpoint"],
         "validation_users": report["coverage"]["eligible_targets"],

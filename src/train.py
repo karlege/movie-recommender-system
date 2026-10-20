@@ -1,6 +1,7 @@
-"""Train the transformer and select a checkpoint using validation NDCG@10.
+"""Train a pooled MLP or transformer; select by validation NDCG@10.
 
-Run: python -m src.train --output-dir runs/transformer_run1
+Run: python -m src.train --model mlp --output-dir runs/mlp_run1
+The default model remains transformer for existing commands.
 For a short trial, add: --max-train-examples 8192 --epochs 2
 The test split is never evaluated by this command.
 """
@@ -24,6 +25,7 @@ from tqdm import tqdm
 from src.baselines import restore_preparation, time_relation_labels
 from src.dataset import PrefixDataset, build_evaluation_examples
 from src.evaluate import evaluate_examples
+from src.models.mlp import PooledMLP
 from src.models.transformer import TransformerRecommender
 from src.scoring import make_score_batch
 
@@ -46,13 +48,20 @@ class TrainConfig:
     n_layers: int = 2
     ff_multiplier: int = 4
     dropout: float = 0.1
+    model: str = "transformer"
+    mlp_hidden: int = 128
 
     def validate(self):
+        if self.model not in ("mlp", "transformer"):
+            raise ValueError("model must be mlp or transformer.")
         positive_sizes = (
             self.epochs, self.batch_size, self.eval_batch_size, self.patience,
-            self.num_threads, self.d_model, self.n_heads, self.n_layers,
-            self.ff_multiplier,
+            self.num_threads, self.d_model,
         )
+        if self.model == "transformer":
+            positive_sizes += (self.n_heads, self.n_layers, self.ff_multiplier)
+        else:
+            positive_sizes += (self.mlp_hidden,)
         if min(positive_sizes) < 1:
             raise ValueError("Epochs, batch sizes, patience, threads and model sizes must be positive.")
         if self.max_train_examples is not None and self.max_train_examples < 1:
@@ -65,8 +74,18 @@ class TrainConfig:
             raise ValueError("Training hyperparameters must be finite.")
         if self.learning_rate <= 0 or self.weight_decay < 0 or self.grad_clip <= 0:
             raise ValueError("Learning rate/gradient clip must be positive; weight decay nonnegative.")
-        if not 0 <= self.dropout < 1 or self.d_model % self.n_heads:
-            raise ValueError("Require dropout in [0, 1) and d_model divisible by n_heads.")
+        if not 0 <= self.dropout < 1:
+            raise ValueError("Require dropout in [0, 1).")
+        if self.model == "transformer" and self.d_model % self.n_heads:
+            raise ValueError("Transformer d_model must be divisible by n_heads.")
+
+
+def build_model(model_type, model_config):
+    """Construct only supported architectures from their recorded settings."""
+    classes = {"transformer": TransformerRecommender, "mlp": PooledMLP}
+    if model_type not in classes:
+        raise ValueError(f"Unknown model type: {model_type!r}.")
+    return classes[model_type](**model_config)
 
 
 def resolve_device(name):
@@ -162,10 +181,19 @@ def evaluate_validation(model, examples, num_items, labels, batch_size):
     return evaluation, perf_counter() - started
 
 
-def save_checkpoint(path, model, model_config, fingerprint, epoch, metrics):
+def save_checkpoint(path, model, model_config, fingerprint, epoch, metrics, model_type=None):
     """Save tensors and primitive metadata; replace best.pt atomically."""
+    if isinstance(model, PooledMLP):
+        actual_type = "mlp"
+    elif isinstance(model, TransformerRecommender):
+        actual_type = "transformer"
+    else:
+        raise ValueError("Checkpoint model must be a supported recommender.")
+    if model_type is not None and model_type != actual_type:
+        raise ValueError("Checkpoint model type does not match the supplied model.")
     payload = {
-        "format_version": 1,
+        "format_version": 2,
+        "model_type": actual_type,
         "model_state_dict": {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
         "model_config": model_config,
         "preparation_fingerprint": fingerprint,
@@ -177,16 +205,28 @@ def save_checkpoint(path, model, model_config, fingerprint, epoch, metrics):
     temporary.replace(path)
 
 
-def load_transformer_checkpoint(path, expected_fingerprint, device="cpu"):
-    """Rebuild an inference model and reject a different data protocol/catalogue."""
+def load_checkpoint(path, expected_fingerprint, device="cpu"):
+    """Load either architecture, including original format-1 transformers."""
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-    if checkpoint["format_version"] != 1:
+    if checkpoint["format_version"] == 1:
+        model_type = "transformer"  # Original files predate model selection.
+    elif checkpoint["format_version"] == 2:
+        model_type = checkpoint.get("model_type")
+    else:
         raise ValueError("Unsupported checkpoint format.")
     if checkpoint["preparation_fingerprint"] != expected_fingerprint:
         raise ValueError("Checkpoint preparation fingerprint mismatch.")
-    model = TransformerRecommender(**checkpoint["model_config"])
+    model = build_model(model_type, checkpoint["model_config"])
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(torch.device(device)).eval()
+    return model, {**checkpoint, "model_type": model_type}
+
+
+def load_transformer_checkpoint(path, expected_fingerprint, device="cpu"):
+    """Backward-compatible entry point for transformer-only callers."""
+    model, checkpoint = load_checkpoint(path, expected_fingerprint, device)
+    if checkpoint["model_type"] != "transformer":
+        raise ValueError("Expected a transformer checkpoint; use load_checkpoint for MLPs.")
     return model, checkpoint
 
 
@@ -225,20 +265,27 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
     )
     model_config = {
         "num_items": len(vocabulary), "max_len": max_len,
-        "d_model": config.d_model, "n_heads": config.n_heads,
-        "n_layers": config.n_layers, "ff_multiplier": config.ff_multiplier,
-        "dropout": config.dropout,
+        "d_model": config.d_model, "dropout": config.dropout,
     }
-    model = TransformerRecommender(**model_config).to(device)
+    if config.model == "transformer":
+        model_config.update(
+            n_heads=config.n_heads, n_layers=config.n_layers,
+            ff_multiplier=config.ff_multiplier,
+        )
+    else:
+        model_config["hidden"] = config.mlp_hidden
+    model = build_model(config.model, model_config).to(device)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay
     )
     metadata = {
-        "model": "causal_transformer", "split": "validation",
+        "model": "causal_transformer" if config.model == "transformer" else "pooled_mlp",
+        "model_type": config.model, "split": "validation",
         "preparation_fingerprint": manifest["fingerprint"],
         "catalogue_movies": len(vocabulary), "coverage": coverage,
         "training_scope": training_scope, "training_config": asdict(config),
         "model_config": model_config,
+        "embedding_convention": "shared table; normal(std=0.02); history scaled by sqrt(d_model)",
         "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "selection_metric": "validation ndcg@10; strictly greater, ties keep earlier epoch",
         "loss": "full-catalogue cross-entropy, targets shifted from item IDs to score columns",
@@ -251,7 +298,7 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
         },
         "code_sha256": {
             name: hashlib.sha256(Path(__file__).parent.joinpath(name).read_bytes()).hexdigest()
-            for name in ("train.py", "models/transformer.py", "scoring.py", "evaluate.py", "baselines.py")
+            for name in ("train.py", "models/mlp.py", "models/transformer.py", "scoring.py", "evaluate.py", "baselines.py")
         },
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -281,7 +328,7 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
                 best_score, best_epoch, bad_epochs = score, epoch, 0
                 save_checkpoint(
                     output_dir / "best.pt", model, model_config,
-                    manifest["fingerprint"], epoch, metrics,
+                    manifest["fingerprint"], epoch, metrics, model_type=config.model,
                 )
             else:
                 bad_epochs += 1
@@ -301,7 +348,7 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
 
     # Reload from disk so the final predictions correspond to the selected
     # epoch, even when the last epoch had worse validation performance.
-    best_model, checkpoint = load_transformer_checkpoint(
+    best_model, checkpoint = load_checkpoint(
         output_dir / "best.pt", manifest["fingerprint"], device
     )
     evaluation, final_seconds = evaluate_validation(
@@ -341,12 +388,13 @@ def main():
     parser.add_argument("--output-dir", type=Path, required=True)
     for name in (
         "epochs", "batch_size", "eval_batch_size", "patience", "seed", "num_threads",
-        "d_model", "n_heads", "n_layers", "ff_multiplier",
+        "d_model", "n_heads", "n_layers", "ff_multiplier", "mlp_hidden",
     ):
         parser.add_argument("--" + name.replace("_", "-"), type=int, default=getattr(defaults, name))
     for name in ("learning_rate", "weight_decay", "grad_clip", "dropout"):
         parser.add_argument("--" + name.replace("_", "-"), type=float, default=getattr(defaults, name))
     parser.add_argument("--max-train-examples", type=int)
+    parser.add_argument("--model", choices=("mlp", "transformer"), default="transformer")
     parser.add_argument("--device", choices=("cpu", "cuda", "mps"), default="cpu")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
@@ -356,7 +404,7 @@ def main():
         TrainConfig(**settings), show_progress=not args.quiet,
     )
     print(json.dumps({key: report[key] for key in (
-        "model", "split", "preparation_fingerprint", "training_scope", "coverage",
+        "model", "model_type", "split", "preparation_fingerprint", "training_scope", "coverage",
         "best_epoch", "epochs_completed", "stopped_early", "metrics", "by_time_relation",
         "training_seconds", "validation_seconds_during_training", "total_run_seconds",
     )}, indent=2))
