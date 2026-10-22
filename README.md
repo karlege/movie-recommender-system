@@ -1,6 +1,6 @@
 # Movie Recommender Systems
 
-SSY340 / DIT969, Chalmers. Group 100: Karl Egeland and Erik Gälldin.
+SSY340 - Deep ML course project, Chalmers. Group 100: Karl Egeland and Erik Gälldin.
 
 Comparison of a pooled-history MLP and a SASRec-inspired causal transformer for predicting the next recorded positive interaction on MovieLens 1M. Each model shares its history/candidate movie embeddings and uses full-catalogue cross-entropy.
 
@@ -9,25 +9,50 @@ Comparison of a pooled-history MLP and a SASRec-inspired causal transformer for 
 - Ratings **>= 4** are positive; require **>= 5 positives/user** (6,034 users).
 - Order by timestamp, then movie ID. Hold out the second-last positive for validation and last for test; validation enters the test history.
 - Maximum history **50**; train-only catalogue **3,525 movies**; **557,170 training prefixes**.
-- Full-catalogue ranking excludes earlier raw ratings, including low ratings. Validation covers **6,030 users**; four unknown targets are excluded.
+- Full-catalogue ranking excludes earlier raw ratings, including low ratings. Validation and test each cover **6,030 users**; four unknown targets per split are excluded.
 
 Both models use 64-dimensional embeddings and dropout 0.1. MLP: mean pooling and 64 -> 128 -> 64 layers. Transformer: two blocks, two heads, feed-forward width 256. AdamW (learning rate 0.001), batch size 256, maximum 20 epochs, patience 5; select by validation NDCG@10.
 
-## Validation results
+## Results
 
-**Mean +/- sample SD across training seeds 42, 43, and 44**, using each run's best validation-NDCG checkpoint and the same data preparation. SD describes variation across seeds.
+**Mean +/- sample SD across training seeds 42, 43, and 44**, using each run's best validation-NDCG checkpoint. Popularity is deterministic. SD describes variation across seeds, not a confidence interval.
+
+### Final test results
+
+All six frozen checkpoints were evaluated on the same test split on CPU; no test-based fitting or checkpoint selection was performed.
 
 | Model | Recall@10 | NDCG@10 | Parameters | Training s/epoch |
 |---|---:|---:|---:|---:|
-| Popularity (deterministic) | 0.05257 | 0.02553 | 0 | - |
-| Pooled MLP | 0.16130 +/- 0.00168 | 0.08539 +/- 0.00040 | 242,240 | 13.77 |
-| Causal transformer | **0.30934 +/- 0.00307** | **0.17593 +/- 0.00160** | 328,960 | 25.57 |
+| Popularity | 0.04461 | 0.02223 | 0 | - |
+| Pooled MLP | 0.13566 +/- 0.00241 | 0.06985 +/- 0.00115 | 242,240 | 13.77 |
+| Causal transformer | **0.29585 +/- 0.00158** | **0.16712 +/- 0.00180** | 328,960 | 25.57 |
 
-Times average per-run training seconds/epoch, excluding validation/startup. Best epochs (seeds 42/43/44): MLP **14/19/20**, transformer **19/17/10**. Strictly-later-target mean Recall@10: MLP **0.13727**, transformer **0.23506**.
+Times are average **L4 training seconds/epoch**, excluding validation/startup; they are not CPU test timings.
 
-For the fixed seed-42 transformer checkpoint, Recall@10 was **0.31244** originally, **0.30746** after shuffling timestamp ties, and **0.10392** after shuffling all retained history (means over three shuffle seeds).
+Test results by the timestamp relation between target and previous positive interaction:
 
-Test results are pending. Rating timestamps may differ from viewing order, and ties are resolved by movie ID. The shuffle diagnostics show order sensitivity; timestamp ties and architectural differences limit causal claims about chronology. A retrained tie-order ablation is outside the reported experiments.
+| Cohort | Users | Model | Recall@10 | NDCG@10 |
+|---|---:|---|---:|---:|
+| Strictly later | 4,128 | Popularity | 0.04651 | 0.02340 |
+| Strictly later | 4,128 | Pooled MLP | 0.10812 +/- 0.00414 | 0.05563 +/- 0.00190 |
+| Strictly later | 4,128 | Causal transformer | 0.21334 +/- 0.00505 | 0.11419 +/- 0.00302 |
+| Tied timestamp | 1,902 | Popularity | 0.04048 | 0.01971 |
+| Tied timestamp | 1,902 | Pooled MLP | 0.19541 +/- 0.00428 | 0.10069 +/- 0.00185 |
+| Tied timestamp | 1,902 | Causal transformer | 0.47494 +/- 0.00598 | 0.28199 +/- 0.00085 |
+
+### Validation results
+
+| Model | Recall@10 | NDCG@10 |
+|---|---:|---:|
+| Popularity | 0.05257 | 0.02553 |
+| Pooled MLP | 0.16130 +/- 0.00168 | 0.08539 +/- 0.00040 |
+| Causal transformer | 0.30934 +/- 0.00307 | 0.17593 +/- 0.00160 |
+
+Selected epochs (seeds 42/43/44): MLP **14/19/20**, transformer **19/17/10**.
+
+For the fixed seed-42 transformer checkpoint, **validation** Recall@10 was **0.31244** originally, **0.30746** after shuffling timestamp ties, and **0.10392** after shuffling all retained history (means over three shuffle seeds).
+
+Rating timestamps may differ from viewing order, and ties are resolved by movie ID. The shuffle diagnostics show order sensitivity; timestamp ties and architectural differences limit causal claims about chronology. A retrained tie-order ablation is outside the reported experiments.
 
 ## Cloud training and reproduction
 
