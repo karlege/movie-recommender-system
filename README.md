@@ -2,7 +2,7 @@
 
 SSY340 / DIT969, Chalmers. Group 100: Karl Egeland and Erik Gälldin.
 
-Compare a pooled-history MLP with a SASRec-inspired causal transformer on MovieLens 1M. Both use shared input/output movie embeddings, dot-product scoring, and full-catalogue cross-entropy. The target is the next recorded positive rating; timestamps record ratings rather than viewing order.
+Comparison of a pooled-history MLP and a SASRec-inspired causal transformer for predicting the next recorded positive interaction on MovieLens 1M. Each model shares its history/candidate movie embeddings and uses full-catalogue cross-entropy.
 
 ## Shared experiment
 
@@ -13,41 +13,55 @@ Compare a pooled-history MLP with a SASRec-inspired causal transformer on MovieL
 
 Both models use 64-dimensional embeddings and dropout 0.1. MLP: mean pooling and 64 -> 128 -> 64 layers. Transformer: two blocks, two heads, feed-forward width 256. AdamW (learning rate 0.001), batch size 256, maximum 20 epochs, patience 5; select by validation NDCG@10.
 
-## Verified results
+## Validation results
 
-**Validation, training seed 42.** These are single-run results; neural-model timings use the same NVIDIA L4.
+**Mean +/- sample SD across training seeds 42, 43, and 44**, using each run's best validation-NDCG checkpoint and the same data preparation. SD describes variation across seeds.
 
-| Model | Recall@10 | NDCG@10 | Parameters | Best epoch | Training s/epoch |
-|---|---:|---:|---:|---:|---:|
-| Popularity | 0.05257 | 0.02553 | 0 | - | - |
-| Pooled MLP | 0.15937 | 0.08568 | 242,240 | 14 | 13.74 |
-| Causal transformer | **0.31244** | **0.17777** | 328,960 | 19 | 25.47 |
+| Model | Recall@10 | NDCG@10 | Parameters | Training s/epoch |
+|---|---:|---:|---:|---:|
+| Popularity (deterministic) | 0.05257 | 0.02553 | 0 | - |
+| Pooled MLP | 0.16130 +/- 0.00168 | 0.08539 +/- 0.00040 | 242,240 | 13.77 |
+| Causal transformer | **0.30934 +/- 0.00307** | **0.17593 +/- 0.00160** | 328,960 | 25.57 |
 
-Times exclude validation/startup. MLP completed 19 epochs; transformer completed 20. Strictly-later-target Recall@10: MLP **0.13227**, transformer **0.24007**.
+Times average per-run training seconds/epoch, excluding validation/startup. Best epochs (seeds 42/43/44): MLP **14/19/20**, transformer **19/17/10**. Strictly-later-target mean Recall@10: MLP **0.13727**, transformer **0.23506**.
 
-Transformer Recall@10: original **0.31244**, shuffled timestamp ties **0.30746**, all retained history shuffled **0.10392** (shuffle means over seeds 42-44). This shows order sensitivity; timestamp ties and architectural differences limit causal claims about chronology.
+For the fixed seed-42 transformer checkpoint, Recall@10 was **0.31244** originally, **0.30746** after shuffling timestamp ties, and **0.10392** after shuffling all retained history (means over three shuffle seeds).
 
-Training seeds 43/44 have also completed; aggregation awaits review of their reports. Test evaluation is pending; the training tie-order ablation is postponed.
+Test results are pending. Rating timestamps may differ from viewing order, and ties are resolved by movie ID. The shuffle diagnostics show order sensitivity; timestamp ties and architectural differences limit causal claims about chronology. A retrained tie-order ablation is outside the reported experiments.
 
 ## Cloud training and reproduction
 
-GPU runs used **Google Cloud Compute Engine, NVIDIA L4, conda `dml`, PyTorch 2.3.1+cu118**. Code, data, and `preparation.json` were copied from the Mac. Training used CUDA and `nohup` to continue after SSH disconnects.
+All six runs used **Google Cloud Compute Engine with an NVIDIA L4**, PyTorch 2.3.1+cu118, and conda. Code, data, and the original preparation manifest were transferred to the VM. CUDA training launched with `nohup` continued after SSH disconnects.
 
-From the project root on the configured VM, use a fresh output directory for each run:
+From the project root on the configured VM, reproduce all six runs in a fresh directory:
 
 ```bash
 conda activate dml
 for task_model in mlp transformer; do
-  python -m src.train --model "$task_model" \
-    --output-dir "runs/${task_model}_20ep_seed42_l4" \
-    --epochs 20 --patience 5 --seed 42 \
-    --batch-size 256 --device cuda --num-threads 4
+  for task_seed in 42 43 44; do
+    python -m src.train --model "$task_model" \
+      --output-dir "runs/reproduction/${task_model}_20ep_seed${task_seed}_l4" \
+      --epochs 20 --patience 5 --seed "$task_seed" \
+      --batch-size 256 --device cuda --num-threads 4 || break 2
+  done
 done
 ```
 
-Use seeds 43 and 44 for repeats. On the Mac, run checks with `uv run python -m pytest tests/ -q`.
+Run checks on the Mac with `uv run python -m pytest tests/ -q`.
 
-**Run artifacts:** `runs/<model>_20ep_seed<seed>_l4/` contains configuration, `history.jsonl` (learning curves), `validation_metrics.json`, `validation_predictions.jsonl`, and `best.pt`. Share the downloaded runs archive for the complete reports/checkpoints.
+For the downloaded L4 runs in `runs/`, evaluate the frozen validation-selected checkpoints and training-popularity baseline on test data:
+
+```bash
+uv run python -m src.final_evaluate \
+  --runs-root runs --output-dir runs/final_test \
+  --seeds 42 43 44 --device cpu --num-threads 4
+```
+
+On the VM, use `python` and `--device cuda`. For reproduced runs, set `--runs-root runs/reproduction`. Keep the original `data/processed/preparation.json`. Testing uses validation interactions in histories while retaining training-only weights, vocabulary, and popularity counts. Reserve test results for final reporting.
+
+## Output files
+
+Each training directory contains `config.json`, `history.jsonl`, `validation_metrics.json`, `validation_predictions.jsonl`, and `best.pt`. Final evaluation writes per-run test metrics/predictions and `comparison.md`, `comparison.csv`, and `comparison.json`, including results for strictly later and tied-timestamp targets. Output directories must be empty.
 
 ## References
 
