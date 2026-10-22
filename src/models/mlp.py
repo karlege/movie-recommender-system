@@ -1,10 +1,10 @@
 """Order-independent pooled MLP adapted from the group's notebook PooledMLP.
 
 The masked mean -> Linear -> ReLU -> Dropout -> Linear encoder follows
-movie-recommender-systems(1).ipynb. For the shared comparison, this version
-uses one movie table for history and candidates, normal(std=0.02) movie
-initialization, sqrt(d_model) history scaling, and default dropout 0.1,
-matching the repository transformer's embedding convention.
+first implementation in movie-recommender-systems.ipynb. For the shared 
+comparison, this version uses one movie table for history and candidates, 
+normal(std=0.02) movie initialization, sqrt(d_model) history scaling, 
+and default dropout 0.1, matching the repository transformer's embedding convention.
 """
 
 import math
