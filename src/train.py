@@ -28,6 +28,7 @@ from src.evaluate import evaluate_examples
 from src.models.mlp import PooledMLP
 from src.models.transformer import TransformerRecommender
 from src.scoring import make_score_batch
+from src.training_probe import build_training_probe
 
 
 @dataclass
@@ -50,6 +51,7 @@ class TrainConfig:
     dropout: float = 0.1
     model: str = "transformer"
     mlp_hidden: int = 128
+    log_train_recall: bool = False
 
     def validate(self):
         if self.model not in ("mlp", "transformer"):
@@ -66,6 +68,8 @@ class TrainConfig:
             raise ValueError("Epochs, batch sizes, patience, threads and model sizes must be positive.")
         if self.max_train_examples is not None and self.max_train_examples < 1:
             raise ValueError("max_train_examples must be positive when supplied.")
+        if self.log_train_recall and self.max_train_examples is not None:
+            raise ValueError("Training probe requires full training; omit --max-train-examples.")
         if self.seed < 0:
             raise ValueError("seed must be nonnegative.")
         if not all(math.isfinite(x) for x in (
@@ -258,6 +262,11 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
     )
     if not examples:
         raise ValueError("No eligible validation targets.")
+    train_examples, train_probe = None, None
+    if config.log_train_recall:
+        train_examples, train_probe = build_training_probe(
+            ratings, splits, vocabulary, examples, max_len
+        )
     labels = time_relation_labels(splits, "validation")
     loader = DataLoader(
         training, batch_size=config.batch_size, shuffle=True, num_workers=0,
@@ -284,6 +293,7 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
         "preparation_fingerprint": manifest["fingerprint"],
         "catalogue_movies": len(vocabulary), "coverage": coverage,
         "training_scope": training_scope, "training_config": asdict(config),
+        "training_probe": train_probe,
         "model_config": model_config,
         "embedding_convention": "shared table; normal(std=0.02); history scaled by sqrt(d_model)",
         "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
@@ -298,7 +308,7 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
         },
         "code_sha256": {
             name: hashlib.sha256(Path(__file__).parent.joinpath(name).read_bytes()).hexdigest()
-            for name in ("train.py", "models/mlp.py", "models/transformer.py", "scoring.py", "evaluate.py", "baselines.py")
+            for name in ("train.py", "models/mlp.py", "models/transformer.py", "scoring.py", "evaluate.py", "baselines.py", "training_probe.py")
         },
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -319,6 +329,11 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
             evaluation, seconds = evaluate_validation(
                 model, examples, len(vocabulary), labels, config.eval_batch_size
             )
+            train_evaluation, train_seconds = None, 0.0
+            if train_examples is not None:
+                train_evaluation, train_seconds = evaluate_validation(
+                    model, train_examples, len(vocabulary), None, config.eval_batch_size
+                )
             metrics = evaluation["metrics"]
             score = metrics["ndcg@10"]
             if score is None or not math.isfinite(score):
@@ -337,6 +352,9 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
                 "metrics": metrics, "by_time_relation": evaluation["by_time_relation"],
                 "saved_best": improved,
             }
+            if train_evaluation is not None:
+                record["train_metrics"] = train_evaluation["metrics"]
+                record["train_evaluation_seconds"] = train_seconds
             history.append(record)
             handle.write(json.dumps(record) + "\n")
             handle.flush()
@@ -365,6 +383,7 @@ def run_training(data_dir, preparation_path, output_dir, config=None, show_progr
         "selection_loop_seconds": selection_loop_seconds,
         "best_checkpoint_evaluation_seconds": final_seconds,
         "total_run_seconds": perf_counter() - started,
+        "train_evaluation_seconds": sum(row.get("train_evaluation_seconds", 0.0) for row in history),
         "optimizer_steps_total": sum(row["optimizer_steps"] for row in history),
         "training_examples_seen_total": sum(row["examples_seen"] for row in history),
     }
@@ -397,6 +416,8 @@ def main():
     parser.add_argument("--model", choices=("mlp", "transformer"), default="transformer")
     parser.add_argument("--device", choices=("cpu", "cuda", "mps"), default="cpu")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--log-train-recall", action="store_true",
+                        help="Evaluate one fixed training prefix per validation user each epoch.")
     args = parser.parse_args()
     settings = {key: getattr(args, key) for key in asdict(defaults)}
     report = run_training(
