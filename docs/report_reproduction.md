@@ -16,7 +16,7 @@ This copies config.json, history.jsonl and validation_metrics.json for six runs 
 uv run python scripts/make_report_results.py --curves-only
 ```
 
-Use all_train_validation_recall.pdf and training_loss.pdf from report/generated/. The recall plot also writes individual seed figures. Training loss averages over all training prefixes; training recall uses one fixed trained prefix per eligible user. The vertical marker is selected by validation NDCG, not recall. Curves are diagnostic reruns; original test metrics remain separate.
+The report's Fig. 2 is report_train_validation_recall.pdf from report/generated/ (one panel per model, all seeds overlaid). The same command also writes all_train_validation_recall.pdf, individual seed figures and training_loss.pdf. Training loss averages over all training prefixes; training recall uses one fixed trained prefix per eligible user. The vertical marker is selected by validation NDCG, not recall. Curves are diagnostic reruns; original test metrics remain separate.
 
 ## 3. Supply original results for tables
 
@@ -40,7 +40,7 @@ Use --validate-only first if desired. Missing or incompatible inputs cause an er
 
 | Report element | Generated file | Source |
 |---|---|---|
-| Training/validation recall | all_train_validation_recall.pdf | Diagnostic history, config and validation selection |
+| Training/validation recall (report Fig. 2) | report_train_validation_recall.pdf | Diagnostic history, config and validation selection |
 | Training cross-entropy | training_loss.pdf | Same diagnostic histories |
 | Final test performance and cost | test_performance.tex | Original comparison.json and original training logs |
 | Timestamp groups | timestamp_groups.tex | Original comparison.json |
@@ -53,12 +53,12 @@ input_hashes.json records the source file hashes. Commit the reporting scripts a
 Add graphicx and booktabs to the preamble alongside amsmath. Upload the two PDFs into figures/ and the three generated .tex tables into the project root.
 
 ```latex
-\begin{figure*}[!t]
+\begin{figure}[!t]
 \centering
-\includegraphics[width=\textwidth]{figures/all_train_validation_recall.pdf}
-\caption{Training-subset and validation Recall@10 in diagnostic reruns. Training recall evaluates one fixed trained prefix per eligible user. Vertical lines mark the best validation NDCG@10 epoch.}
+\includegraphics[width=\columnwidth]{figures/report_train_validation_recall.pdf}
+\caption{Recall@10 per epoch, one line per training seed. Orange: validation. Blue: the same check on each validation user's last training example.}
 \label{fig:recall-curves}
-\end{figure*}
+\end{figure}
 
 \begin{figure*}[!t]
 \centering

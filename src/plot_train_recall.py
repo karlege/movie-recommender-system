@@ -70,6 +70,28 @@ def main():
     fig.savefig(args.output_dir / 'all_train_validation_recall.pdf')
     fig.savefig(args.output_dir / 'all_train_validation_recall.png', dpi=200)
     plt.close(fig)
+    # Compact single-column version for the report
+    plt.rcParams.update({'font.size': 8})
+    compact, (ax_mlp, ax_tr) = plt.subplots(1, 2, figsize=(3.5, 1.9), sharey=True,
+                                            layout='constrained')
+    for model, seed, config, rows, best in inputs:
+        ax = ax_mlp if model == 'mlp' else ax_tr
+        epochs = [r['epoch'] for r in rows]
+        ax.plot(epochs, [r['train_metrics']['recall@10'] for r in rows],
+                color='#176B9C', lw=0.9)
+        ax.plot(epochs, [r['metrics']['recall@10'] for r in rows],
+                color='#C45D18', lw=0.9)
+    for ax, title in ((ax_mlp, 'Pooled MLP'), (ax_tr, 'Transformer')):
+        ax.set(title=title, xlabel='Epoch', xlim=(1, 20), ylim=(0, 0.45))
+        ax.set_xticks([1, 5, 10, 15, 20])
+        ax.grid(alpha=.2)
+        ax.yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
+    ax_mlp.set_ylabel('Recall@10')
+    ax_mlp.plot([], [], color='#176B9C', label='Train (one prefix/user)')
+    ax_mlp.plot([], [], color='#C45D18', label='Validation')
+    ax_mlp.legend(fontsize=6, frameon=False, loc='upper left')
+    compact.savefig(args.output_dir / 'report_train_validation_recall.pdf')
+    plt.close(compact)
     print(f'Saved figures to {args.output_dir}')
 
 
