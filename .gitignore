@@ -16,3 +16,8 @@ runs/
 # Local secrets and operating-system files
 .env
 .DS_Store
+
+# Reproducible report outputs and downloaded bundles
+report/generated/
+*.tar.gz
+*.zip
