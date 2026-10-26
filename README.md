@@ -43,3 +43,22 @@ Training and evaluation modules remain under `src/`; report orchestration is und
 
 - Harper and Konstan (2015), The MovieLens Datasets: History and Context.
 - Kang and McAuley (2018), Self-Attentive Sequential Recommendation.
+
+## What training looks like
+
+The plots below show training and validation Recall@10 for both models
+across three random seeds. Training recall is measured on one fixed
+training example per user. The dotted lines mark the epochs selected
+using validation NDCG@10.
+
+![Training and validation Recall@10 for the MLP and transformer](docs/figures/training_recall.png)
+
+The small result files are included in `results/training_curves/`.
+To recreate these plots and the training-loss figure, run:
+
+```bash
+uv run python scripts/make_report_results.py --curves-only
+```
+
+These curves come from extra runs used to inspect training.
+The original test results are listed in `docs/reported_results.md`

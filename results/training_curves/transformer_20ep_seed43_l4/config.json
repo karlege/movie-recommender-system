@@ -1,0 +1,84 @@
+{
+  "model": "causal_transformer",
+  "model_type": "transformer",
+  "split": "validation",
+  "preparation_fingerprint": "560fbb98c31d75f1c15eef5d66545b2758181036805b71336bea21ec794e9e18",
+  "catalogue_movies": 3525,
+  "coverage": {
+    "total_targets": 6034,
+    "eligible_targets": 6030,
+    "excluded_unknown_targets": 4,
+    "excluded_empty_histories": 0
+  },
+  "training_scope": {
+    "scope": "full_training",
+    "available_examples": 557170,
+    "examples_per_epoch": 557170,
+    "subset_indices_sha256": null
+  },
+  "training_config": {
+    "epochs": 20,
+    "batch_size": 256,
+    "eval_batch_size": 128,
+    "learning_rate": 0.001,
+    "weight_decay": 0.01,
+    "grad_clip": 1.0,
+    "patience": 5,
+    "max_train_examples": null,
+    "seed": 43,
+    "device": "cuda",
+    "num_threads": 4,
+    "d_model": 64,
+    "n_heads": 2,
+    "n_layers": 2,
+    "ff_multiplier": 4,
+    "dropout": 0.1,
+    "model": "transformer",
+    "mlp_hidden": 128,
+    "log_train_recall": true
+  },
+  "training_probe": {
+    "scope": "last_training_prefix_per_validation_user",
+    "description": "In-sample diagnostic subset; not all training prefixes",
+    "users": 6030,
+    "coverage": {
+      "total_targets": 6030,
+      "eligible_targets": 6030,
+      "excluded_unknown_targets": 0,
+      "excluded_empty_histories": 0
+    },
+    "examples_sha256": "075a78ccf38fe0fc0702de2939ccc105ecbb9e5f94de9dab3b3b80a0da79a878"
+  },
+  "model_config": {
+    "num_items": 3525,
+    "max_len": 50,
+    "d_model": 64,
+    "dropout": 0.1,
+    "n_heads": 2,
+    "n_layers": 2,
+    "ff_multiplier": 4
+  },
+  "embedding_convention": "shared table; normal(std=0.02); history scaled by sqrt(d_model)",
+  "trainable_parameters": 328960,
+  "selection_metric": "validation ndcg@10; strictly greater, ties keep earlier epoch",
+  "loss": "full-catalogue cross-entropy, targets shifted from item IDs to score columns",
+  "environment": {
+    "python": "3.11.17",
+    "torch": "2.3.1+cu118",
+    "numpy": "1.26.4",
+    "platform": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "device": "cuda",
+    "accelerator": "NVIDIA L4",
+    "torch_threads": 4
+  },
+  "code_sha256": {
+    "train.py": "2abff510ecbaac9bbbdb7b39d7e2534421ef7867b8e996eca992e9ccedd4ce32",
+    "models/mlp.py": "34542afc3612a7122b07bee7c2527663d6789685fdd10001cd85f086475246b4",
+    "models/transformer.py": "21233a9ad564493d84b0e4d477d93d01e38cc56f4bd794bb0e955abc7b210517",
+    "scoring.py": "77d2b63ff5df4a28e10ddd8834416acc265c99ecb737c3a22ae1b5426877cac2",
+    "evaluate.py": "20cb6563c56d7222ef5cc7eedeac78adf8a2f380d499b53394c13a9f43b136a0",
+    "baselines.py": "ca10b0a6da0a2d147a10b2fe2e6e177f5825953c51bda841c06a0d5211f7b841",
+    "training_probe.py": "835c48367f290146d103b6defb7d25a61354eb33f89e0ea30240c5563db10b60"
+  }
+}
