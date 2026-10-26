@@ -39,11 +39,6 @@ Outputs go to `report/generated/`, which must be empty or absent. Use `--output-
 
 Training and evaluation modules remain under `src/`; report orchestration is under `scripts/`. Raw data, checkpoints and generated figures are excluded from Git. Small, non-personal aggregate result logs can be committed under `results/`.
 
-## References
-
-- Harper and Konstan (2015), The MovieLens Datasets: History and Context.
-- Kang and McAuley (2018), Self-Attentive Sequential Recommendation.
-
 ## What training looks like
 
 The plots below show training and validation Recall@10 for both models
@@ -62,3 +57,8 @@ uv run python scripts/make_report_results.py --curves-only
 
 These curves come from extra runs used to inspect training.
 The original test results are listed in `docs/reported_results.md`
+
+## References
+
+- Harper and Konstan (2015), The MovieLens Datasets: History and Context.
+- Kang and McAuley (2018), Self-Attentive Sequential Recommendation.
